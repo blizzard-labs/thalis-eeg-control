@@ -307,12 +307,12 @@ class EEGPreprocessor:
                         self._notch_state.zi[i] = signal.lfilter_zi(
                             self._notch_b, self._notch_a
                         ) * eeg_data[i]
-                    filtered[i], self._notch_state.zi[i] = signal.lfilter(
+                    out, self._notch_state.zi[i] = signal.lfilter(
                         self._notch_b, self._notch_a,
                         [eeg_data[i]],
                         zi=self._notch_state.zi[i]
                     )
-                    filtered[i] = filtered[i][0]
+                    filtered[i] = out[0]
                 self._notch_state.initialized = True
             else:
                 # Batch mode with state
@@ -380,12 +380,12 @@ class EEGPreprocessor:
                 for i in range(len(eeg_data)):
                     if not state.initialized:
                         state.zi[i] = signal.sosfilt_zi(sos) * eeg_data[i]
-                    filtered[i], state.zi[i] = signal.sosfilt(
+                    out, state.zi[i] = signal.sosfilt(
                         sos,
                         [eeg_data[i]],
                         zi=state.zi[i]
                     )
-                    filtered[i] = filtered[i][0]
+                    filtered[i] = out[0]
                 state.initialized = True
             else:
                 for i in range(eeg_data.shape[1]):

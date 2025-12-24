@@ -4,8 +4,8 @@ import subprocess
 import argparse
 import string
 import sys
-import unicornlsl.stream as ulsl
-from unicornlsl.clean import EEGPreprocessor, create_preprocessing_callback
+import unicorneeg.stream as ulsl
+from unicorneeg.clean import EEGPreprocessor, create_preprocessing_callback
 
 def collect_data(background_prcs=False, graphing=True, duration=0, run_name=""):
     
@@ -93,8 +93,8 @@ Latest version: https://github.com/blizzard-labs/thalis-eeg-control
 
 '''
 
-from unicornlsl.stream import EEGStream, EEGStreamConfig
-from unicornlsl.clean import EEGPreprocessor, create_preprocessing_callback
+from unicorneeg.stream import EEGStream, EEGStreamConfig
+from unicorneeg.clean import EEGPreprocessor, create_preprocessing_callback
 
 # Create preprocessor
 preprocessor = EEGPreprocessor()

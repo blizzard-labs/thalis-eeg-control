@@ -211,7 +211,14 @@ class EEGStream:
                 ax = self._lines[col].axes
                 ax.relim()
                 ax.autoscale_view()
-                ax.set_xlim(left=0, right=max(t_rel) if t_rel else self.config.buffer_seconds)
+                
+                #ax.set_xlim(left=0, right=max(t_rel) if t_rel else self.config.buffer_seconds)
+                
+                # Avoid singular xlims (left == right)
+                max_t = max(t_rel) if t_rel else 0
+                right_lim = max_t if max_t > 0 else self.config.buffer_seconds
+                ax.set_xlim(left=0, right=right_lim)
+                
         
         plt.pause(0.001)
     
