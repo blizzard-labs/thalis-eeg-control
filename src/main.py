@@ -1,17 +1,26 @@
 import os
+from random import sample
 import subprocess
 import argparse
 import string
 import sys
 import unicornlsl.stream as ulsl
+from unicornlsl.clean import EEGPreprocessor, create_preprocessing_callback
 
 def collect_data(background_prcs=False, graphing=True, duration=0, run_name=""):
     
-    def process_sample(sample):
-        #Real-time signal analysis here
-        #print(f"Recieved sample at t={sample['Time']:.3f}")
+    def handle_processed(sample):
+        #print(f"Processed sample at t={sample['Time']}")
         pass
-        
+
+    preprocessor = EEGPreprocessor()
+    
+    callback = create_preprocessing_callback(
+        preprocessor=preprocessor,
+        output_callback=handle_processed,
+        output_band='combined'  # or 'alpha', 'beta'
+    )
+
     config = ulsl.EEGStreamConfig(
         use_background_thread=background_prcs,
         enable_graphing=graphing,
@@ -20,10 +29,19 @@ def collect_data(background_prcs=False, graphing=True, duration=0, run_name=""):
     )
     
     stream = ulsl.EEGStream(config)
-    stream.on_sample(process_sample)
+    stream.on_sample(callback)
     
     usrconfirm = input("Press Enter to start data collection...")
-    stream.start()
+    
+    print("Connecting to EEG stream...")
+    try:
+        stream.connect()
+        print("Connected! Starting data collection...")
+        stream.start()
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        print("Make sure the Unicorn EEG device is streaming via LSL.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
@@ -71,4 +89,35 @@ Latest version: https://github.com/blizzard-labs/thalis-eeg-control
     if args.mode == 'collect':
         collect_data(background_prcs=False, graphing=True, duration=args.duration, run_name=args.name)
 
-         
+
+
+'''
+
+from unicornlsl.stream import EEGStream, EEGStreamConfig
+from unicornlsl.clean import EEGPreprocessor, create_preprocessing_callback
+
+# Create preprocessor
+preprocessor = EEGPreprocessor()
+
+# For real-time processing
+def handle_processed(sample):
+    print(f"Processed sample at t={sample['Time']}")
+
+callback = create_preprocessing_callback(
+    preprocessor=preprocessor,
+    output_callback=handle_processed,
+    output_band='combined'  # or 'alpha', 'beta'
+)
+
+config = EEGStreamConfig(use_background_thread=True)
+stream = EEGStream(config)
+stream.on_sample(callback)
+stream.start()
+
+# For batch processing of collected data
+df = stream.get_dataframe()
+processed = preprocessor.process_batch(df)
+# or for separate alpha/beta bands:
+processed_multiband = preprocessor.process_batch_multiband(df)
+
+'''
