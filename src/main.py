@@ -5,16 +5,18 @@ import string
 import sys
 import unicornlsl.stream as ulsl
 
-def collect_data(background_prcs=False, graphing=True, duration=0):
+def collect_data(background_prcs=False, graphing=True, duration=0, run_name=""):
     
     def process_sample(sample):
         #Real-time signal analysis here
-        print(f"Recieved sample at t={sample['Time']:.3f}")
+        #print(f"Recieved sample at t={sample['Time']:.3f}")
+        pass
         
     config = ulsl.EEGStreamConfig(
         use_background_thread=background_prcs,
         enable_graphing=graphing,
-        save_duration_seconds=duration
+        save_duration_seconds=duration,
+        csv_path=os.path.join("data/streamlogs", run_name + "_eeg_data.csv")
     )
     
     stream = ulsl.EEGStream(config)
@@ -44,13 +46,13 @@ Latest version: https://github.com/blizzard-labs/thalis-eeg-control
     
     help_msg = '''
         Thalamic Integration System: EEG-Based Prosthetic Control
-        Usage: python main.py --mode <mode> --model <model_path> --output <output_folder> [OPTIONS]
+        Usage: python main.py --mode <mode> --model <model_path> --name <run_name> [OPTIONS]
     '''
     
     parser.add_argument("--mode", type=str, choices=['default', 'collect', 'simulate', 'fine-tune', 'train'],
                         required=True, help="Operation mode: 'default', 'collect', or 'simulate'")
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--output", type=str, required=True)
+    parser.add_argument("--name", type=str, required=True)
     
     parser.add_argument("--duration", type=int, default=100,
                         required=False, help="Duration for data collection in seconds (default: 100s)")
@@ -64,7 +66,9 @@ Latest version: https://github.com/blizzard-labs/thalis-eeg-control
         DEFAULT MODE: Collect and process EEG data w/ pre-trained model and simulate prosthetic control.
         '''
         
-        collect_data()
+        collect_data(background_prcs=True, graphing=True, duration=args.duration, run_name=args.name)
         
-    
+    if args.mode == 'collect':
+        collect_data(background_prcs=False, graphing=True, duration=args.duration, run_name=args.name)
+
          

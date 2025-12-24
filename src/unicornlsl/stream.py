@@ -232,7 +232,7 @@ class EEGStream:
             return None
             
         if self._start_time is None:
-            self._start_time = timestamp
+            self._start_time = time.time()
         
         all_data = [timestamp] + data
         sample = {}
@@ -260,7 +260,7 @@ class EEGStream:
             
             # Check duration limit
             if self.config.save_duration_seconds > 0:
-                elapsed = sample['Time'] - self._start_time
+                elapsed = time.time() - self._start_time
                 if elapsed >= self.config.save_duration_seconds:
                     self._running = False
                     break
@@ -276,7 +276,7 @@ class EEGStream:
             
             # Check duration limit
             if self.config.save_duration_seconds > 0:
-                elapsed = sample['Time'] - self._start_time
+                elapsed = time.time() - self._start_time
                 if elapsed >= self.config.save_duration_seconds:
                     self._running = False
                     break
@@ -414,6 +414,7 @@ class EEGStream:
                 buffer.clear()
         self._start_time = None
     
+    '''
     @property
     def elapsed_time(self) -> float:
         """Get elapsed collection time in seconds."""
@@ -424,6 +425,7 @@ class EEGStream:
             if times:
                 return times[-1] - self._start_time
         return 0.0
+    '''
     
     @property
     def sample_count(self) -> int:
