@@ -88,36 +88,3 @@ Latest version: https://github.com/blizzard-labs/thalis-eeg-control
         
     if args.mode == 'collect':
         collect_data(background_prcs=False, graphing=True, duration=args.duration, run_name=args.name)
-
-
-
-'''
-
-from unicorneeg.stream import EEGStream, EEGStreamConfig
-from unicorneeg.clean import EEGPreprocessor, create_preprocessing_callback
-
-# Create preprocessor
-preprocessor = EEGPreprocessor()
-
-# For real-time processing
-def handle_processed(sample):
-    print(f"Processed sample at t={sample['Time']}")
-
-callback = create_preprocessing_callback(
-    preprocessor=preprocessor,
-    output_callback=handle_processed,
-    output_band='combined'  # or 'alpha', 'beta'
-)
-
-config = EEGStreamConfig(use_background_thread=True)
-stream = EEGStream(config)
-stream.on_sample(callback)
-stream.start()
-
-# For batch processing of collected data
-df = stream.get_dataframe()
-processed = preprocessor.process_batch(df)
-# or for separate alpha/beta bands:
-processed_multiband = preprocessor.process_batch_multiband(df)
-
-'''
