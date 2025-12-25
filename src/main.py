@@ -6,18 +6,34 @@ import string
 import sys
 import unicorneeg.stream as ulsl
 from unicorneeg.clean import EEGPreprocessor, create_preprocessing_callback
+from unicorneeg.pipe import RealTimeWindowBuffer, WindowConfig, create_windowing_callback
 
-def collect_data(background_prcs=False, graphing=True, duration=0, run_name=""):
+def collect_data(background_prcs=False, graphing=True, duration=0, run_name="", current_label=0):
     
+    def handle_window(window):
+        """Called when a new window is ready (94 samples, 750ms)."""
+        print(f"Window {window.window_idx}: label={window.label}, shape={window.data.shape}")
+        # TODO: Feed window.data to classifier here
+        pass
+
     def handle_processed(sample):
         #print(f"Processed sample at t={sample['Time']}")
         pass
 
+    # Setup preprocessing pipeline
     preprocessor = EEGPreprocessor()
     
-    callback = create_preprocessing_callback(
+    # Setup windowing pipeline (750ms window, 125ms step)
+    window_config = WindowConfig()  # Uses default: 94 samples window, 16 samples step
+    window_buffer = RealTimeWindowBuffer(config=window_config, current_label=current_label)
+    window_buffer.on_window(handle_window)
+    
+    # Create chained callbacks: raw -> preprocess -> window
+    windowing_callback = create_windowing_callback(window_buffer)
+    
+    preprocessing_callback = create_preprocessing_callback(
         preprocessor=preprocessor,
-        output_callback=handle_processed,
+        output_callback=windowing_callback,  # Feed preprocessed samples to windowing
         output_band='combined'  # or 'alpha', 'beta'
     )
 
@@ -29,7 +45,7 @@ def collect_data(background_prcs=False, graphing=True, duration=0, run_name=""):
     )
     
     stream = ulsl.EEGStream(config)
-    stream.on_sample(callback)
+    stream.on_sample(preprocessing_callback)
     
     usrconfirm = input("Press Enter to start data collection...")
     
@@ -37,11 +53,15 @@ def collect_data(background_prcs=False, graphing=True, duration=0, run_name=""):
     try:
         stream.connect()
         print("Connected! Starting data collection...")
+        print(f"Windowing: {window_config.window_samples} samples ({window_config.window_length_ms}ms), "
+              f"step: {window_config.step_samples} samples ({window_config.step_size_ms}ms)")
         stream.start()
     except RuntimeError as e:
         print(f"Error: {e}")
         print("Make sure the Unicorn EEG device is streaming via LSL.")
         sys.exit(1)
+    
+    return window_buffer  # Return buffer for access to collected windows
 
 
 if __name__ == "__main__":
