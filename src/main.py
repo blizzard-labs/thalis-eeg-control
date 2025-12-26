@@ -8,7 +8,7 @@ import unicorneeg.stream as ulsl
 from unicorneeg.clean import EEGPreprocessor, create_preprocessing_callback
 from unicorneeg.pipe import RealTimeWindowBuffer, WindowConfig, create_windowing_callback
 
-def collect_data(background_prcs=False, graphing=True, duration=0, run_name="", current_label=0):
+def collect_data(background_prcs=False, graphing=True, duration=0, run_name="", current_label=0, burn_in_seconds=15.0):
     
     def handle_window(window):
         """Called when a new window is ready (94 samples, 750ms)."""
@@ -16,10 +16,12 @@ def collect_data(background_prcs=False, graphing=True, duration=0, run_name="", 
         # TODO: Feed window.data to classifier here
         pass
 
+    '''
     def handle_processed(sample):
         #print(f"Processed sample at t={sample['Time']}")
         pass
-
+    '''
+    
     # Setup preprocessing pipeline
     preprocessor = EEGPreprocessor()
     
@@ -41,11 +43,19 @@ def collect_data(background_prcs=False, graphing=True, duration=0, run_name="", 
         use_background_thread=background_prcs,
         enable_graphing=graphing,
         save_duration_seconds=duration,
-        csv_path=os.path.join("data/streamlogs", run_name + "_eeg_data.csv")
+        csv_path=os.path.join("data/streamlogs", run_name + "_eeg_data.csv"),
+        burn_in_seconds=burn_in_seconds  # Burn-in period: data processed but discarded
     )
     
     stream = ulsl.EEGStream(config)
     stream.on_sample(preprocessing_callback)
+    
+    # Register burn-in complete callback to reset window buffer
+    def on_burn_in_done():
+        print("[Burn-in] Resetting window buffer...")
+        window_buffer.reset()
+    
+    stream.on_burn_in_complete(on_burn_in_done)
     
     usrconfirm = input("Press Enter to start data collection...")
     
@@ -95,6 +105,9 @@ Latest version: https://github.com/blizzard-labs/thalis-eeg-control
     parser.add_argument("--duration", type=int, default=100,
                         required=False, help="Duration for data collection in seconds (default: 100s)")
     
+    parser.add_argument("--burn-in", type=float, default=15.0,
+                        required=False, help="Burn-in period in seconds where data is processed but discarded (default: 15s)")
+    
     args = parser.parse_args()
     print(f"Selected Mode: {args.mode}")
     
@@ -104,7 +117,7 @@ Latest version: https://github.com/blizzard-labs/thalis-eeg-control
         DEFAULT MODE: Collect and process EEG data w/ pre-trained model and simulate prosthetic control.
         '''
         
-        collect_data(background_prcs=True, graphing=True, duration=args.duration, run_name=args.name)
+        collect_data(background_prcs=True, graphing=True, duration=args.duration, run_name=args.name, burn_in_seconds=args.burn_in)
         
     if args.mode == 'collect':
-        collect_data(background_prcs=False, graphing=True, duration=args.duration, run_name=args.name)
+        collect_data(background_prcs=False, graphing=True, duration=args.duration, run_name=args.name, burn_in_seconds=args.burn_in)

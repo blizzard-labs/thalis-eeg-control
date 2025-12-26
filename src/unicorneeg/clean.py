@@ -4,8 +4,9 @@ EEG Preprocessing Module - Real-time signal preprocessing for Unicorn EEG data.
 Implements:
 1. Rereferencing (common average reference)
 2. Line Noise Handling (2nd order IIR Notch filter @ 60Hz)
-3. Bandpass Filtering (4th order Butterworth for alpha 8-13Hz and beta 13-30Hz)
-4. Downsampling (250 Hz -> 125 Hz)
+3. Detrending (constant detrend to remove DC offset)
+4. Bandpass Filtering (4th order Butterworth for alpha 8-13Hz and beta 13-30Hz)
+5. Downsampling (250 Hz -> 125 Hz)
 
 Designed for real-time processing during data collection with stream.py.
 """
@@ -95,8 +96,9 @@ class EEGPreprocessor:
     Applies the following processing steps:
     1. Rereferencing (common average reference)
     2. 60 Hz notch filter (2nd order IIR)
-    3. Bandpass filtering (4th order Butterworth)
-    4. Downsampling (250 -> 125 Hz)
+    3. Detrending (constant detrend to remove DC offset)
+    4. Bandpass filtering (4th order Butterworth)
+    5. Downsampling (250 -> 125 Hz)
     
     Examples
     --------
@@ -464,12 +466,15 @@ class EEGPreprocessor:
             # 2. Notch filter (60 Hz)
             eeg_values = self.apply_notch_filter(eeg_values, realtime=True)
             
-            # 3. Bandpass filter
+            # 3. Detrend (remove DC offset)
+            eeg_values = signal.detrend(eeg_values, type='constant')
+            
+            # 4. Bandpass filter
             eeg_values = self.apply_bandpass_filter(
                 eeg_values, band=output_band, realtime=True
             )
             
-            # 4. Downsampling - accumulate samples
+            # 5. Downsampling - accumulate samples
             self._sample_counter += 1
             
             if self.config.enable_downsampling:
@@ -519,7 +524,10 @@ class EEGPreprocessor:
             # 2. Notch filter (60 Hz)
             eeg_notched = self.apply_notch_filter(eeg_values.copy(), realtime=True)
             
-            # 3. Bandpass filter - both bands
+            # 3. Detrend (remove DC offset)
+            eeg_notched = signal.detrend(eeg_notched, type='constant')
+            
+            # 4. Bandpass filter - both bands
             # Note: For multiband, we need separate filter states
             # Reset to notched data for each band
             alpha_values = self.apply_bandpass_filter(
@@ -529,7 +537,7 @@ class EEGPreprocessor:
                 eeg_notched.copy(), band='beta', realtime=True
             )
             
-            # 4. Downsampling
+            # 5. Downsampling
             self._sample_counter += 1
             
             if self.config.enable_downsampling:
@@ -593,12 +601,15 @@ class EEGPreprocessor:
         # 2. Notch filter (60 Hz) - zero-phase
         eeg_data = self.apply_notch_filter(eeg_data, realtime=False)
         
-        # 3. Bandpass filter - zero-phase
+        # 3. Detrend (remove DC offset)
+        eeg_data = signal.detrend(eeg_data, type='constant', axis=0)
+        
+        # 4. Bandpass filter - zero-phase
         eeg_data = self.apply_bandpass_filter(
             eeg_data, band=output_band, realtime=False
         )
         
-        # 4. Downsample
+        # 5. Downsample
         eeg_data = self.downsample(eeg_data)
         
         if is_dataframe:
@@ -644,7 +655,10 @@ class EEGPreprocessor:
         # 2. Notch filter (60 Hz)
         eeg_notched = self.apply_notch_filter(eeg_data, realtime=False)
         
-        # 3. Bandpass filter - both bands
+        # 3. Detrend (remove DC offset)
+        eeg_notched = signal.detrend(eeg_notched, type='constant', axis=0)
+        
+        # 4. Bandpass filter - both bands
         alpha_data = self.apply_bandpass_filter(
             eeg_notched.copy(), band='alpha', realtime=False
         )
@@ -652,7 +666,7 @@ class EEGPreprocessor:
             eeg_notched.copy(), band='beta', realtime=False
         )
         
-        # 4. Downsample both
+        # 5. Downsample both
         alpha_data = self.downsample(alpha_data)
         beta_data = self.downsample(beta_data)
         

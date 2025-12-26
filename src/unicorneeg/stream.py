@@ -46,6 +46,10 @@ class EEGStreamConfig:
     # Threading options
     use_background_thread: bool = False
     
+    # Burn-in period: data is processed but discarded during this time
+    # Plots and buffers are reset after burn-in completes
+    burn_in_seconds: float = 0.0  # 0 means no burn-in
+    
     @property
     def buffer_maxlen(self) -> int:
         return self.sample_rate * self.buffer_seconds
@@ -109,6 +113,10 @@ class EEGStream:
         # Callbacks for sample processing
         self._sample_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         
+        # Burn-in state tracking
+        self._burn_in_complete: bool = False
+        self._burn_in_callbacks: List[Callable[[], None]] = []
+        
         # Plotting state
         self._fig = None
         self._axes = None
@@ -164,6 +172,29 @@ class EEGStream:
         if callback in self._sample_callbacks:
             self._sample_callbacks.remove(callback)
     
+    def on_burn_in_complete(self, callback: Callable[[], None]) -> 'EEGStream':
+        """
+        Register a callback to be called when burn-in period completes.
+        
+        Useful for resetting external buffers/state after burn-in.
+        
+        Parameters
+        ----------
+        callback : callable
+            Function with no arguments, called once when burn-in completes.
+            
+        Returns
+        -------
+        EEGStream
+            Self for method chaining.
+        """
+        self._burn_in_callbacks.append(callback)
+        return self
+    
+    def is_burn_in_complete(self) -> bool:
+        """Check if burn-in period has completed."""
+        return self._burn_in_complete
+    
     def _setup_plot(self) -> None:
         """Initialize matplotlib figure and axes for real-time plotting."""
         if not self.config.enable_graphing:
@@ -192,6 +223,24 @@ class EEGStream:
             self._fig.delaxes(axes_flat[j])
         
         plt.tight_layout()
+    
+    def reset_plots(self) -> None:
+        """
+        Reset all plot lines to empty, clearing displayed data.
+        
+        Called automatically after burn-in period completes to give a fresh start.
+        """
+        if not self.config.enable_graphing or self._fig is None:
+            return
+            
+        for col in self.config.plot_columns:
+            if col in self._lines:
+                self._lines[col].set_data([], [])
+                ax = self._lines[col].axes
+                ax.relim()
+                ax.autoscale_view()
+        
+        plt.draw()
     
     def _update_plot(self) -> None:
         """Update plot with current buffer contents."""
@@ -249,7 +298,7 @@ class EEGStream:
                 self._data_buffers[key].append(all_data[i])
                 sample[key] = all_data[i]
         
-        # Invoke callbacks
+        # Invoke callbacks (even during burn-in for preprocessing pipeline warmup)
         for callback in self._sample_callbacks:
             try:
                 callback(sample)
@@ -258,6 +307,44 @@ class EEGStream:
         
         return sample
     
+    def _check_burn_in_complete(self) -> bool:
+        """
+        Check if burn-in period has completed and handle transition.
+        
+        Returns
+        -------
+        bool
+            True if burn-in just completed (transition), False otherwise.
+        """
+        if self._burn_in_complete or self.config.burn_in_seconds <= 0:
+            return False
+        
+        elapsed = time.time() - self._start_time
+        if elapsed >= self.config.burn_in_seconds:
+            self._burn_in_complete = True
+            print(f"\n[Burn-in Complete] {self.config.burn_in_seconds}s burn-in period finished. Resetting buffers and plots...")
+            
+            # Clear all data buffers - discard burn-in data
+            self.clear_buffers()
+            
+            # Reset the start time so duration tracking starts fresh
+            self._start_time = time.time()
+            
+            # Reset plots
+            self.reset_plots()
+            
+            # Invoke burn-in complete callbacks (e.g., reset window buffers)
+            for callback in self._burn_in_callbacks:
+                try:
+                    callback()
+                except Exception as e:
+                    print(f"Warning: Burn-in callback raised exception: {e}")
+            
+            print("[Burn-in Complete] Data collection now active.\n")
+            return True
+        
+        return False
+    
     def _collection_loop(self) -> None:
         """Main data collection loop."""
         while self._running:
@@ -265,12 +352,16 @@ class EEGStream:
             if sample is None:
                 continue
             
-            # Check duration limit
-            if self.config.save_duration_seconds > 0:
-                elapsed = time.time() - self._start_time
-                if elapsed >= self.config.save_duration_seconds:
-                    self._running = False
-                    break
+            # Check if burn-in period completed
+            self._check_burn_in_complete()
+            
+            # Check duration limit (only after burn-in complete)
+            if self._burn_in_complete or self.config.burn_in_seconds <= 0:
+                if self.config.save_duration_seconds > 0:
+                    elapsed = time.time() - self._start_time
+                    if elapsed >= self.config.save_duration_seconds:
+                        self._running = False
+                        break
     
     def _collection_loop_with_plot(self) -> None:
         """Data collection loop with real-time plotting (must run in main thread)."""
@@ -279,14 +370,18 @@ class EEGStream:
             if sample is None:
                 continue
             
+            # Check if burn-in period completed
+            self._check_burn_in_complete()
+            
             self._update_plot()
             
-            # Check duration limit
-            if self.config.save_duration_seconds > 0:
-                elapsed = time.time() - self._start_time
-                if elapsed >= self.config.save_duration_seconds:
-                    self._running = False
-                    break
+            # Check duration limit (only after burn-in complete)
+            if self._burn_in_complete or self.config.burn_in_seconds <= 0:
+                if self.config.save_duration_seconds > 0:
+                    elapsed = time.time() - self._start_time
+                    if elapsed >= self.config.save_duration_seconds:
+                        self._running = False
+                        break
     
     def start(self) -> 'EEGStream':
         """
@@ -305,6 +400,11 @@ class EEGStream:
         
         self._running = True
         self._start_time = None
+        self._burn_in_complete = self.config.burn_in_seconds <= 0  # Skip burn-in if duration is 0
+        
+        # Print burn-in info if enabled
+        if self.config.burn_in_seconds > 0:
+            print(f"[Burn-in] Starting {self.config.burn_in_seconds}s burn-in period. Data will be processed but discarded...")
         
         if self.config.use_background_thread:
             # Background thread mode - graphing disabled (matplotlib not thread-safe)
