@@ -1,3 +1,5 @@
+//Go to src/applets/eeg-collector and run "npm run dev" to start the app
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCcw, Download } from 'lucide-react';
 
