@@ -182,7 +182,7 @@ const EEGDataCollector = () => {
       <div className="max-w-6xl mx-auto">
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <h1 className="text-3xl font-bold text-gray-800 mb-2">
-            EEG Motor Imagery Data Collection
+            THALis EEG Motor Imagery Data Collection
           </h1>
           <p className="text-gray-600 mb-4">
             320 trials: 80 rest, 80 thumb, 80 index, 80 pinky (randomized)
@@ -236,10 +236,10 @@ const EEGDataCollector = () => {
             <div className="bg-gray-50 p-4 rounded-lg">
               <div className="text-sm text-gray-600 mb-1">Current Class</div>
               <div className="text-2xl font-bold text-gray-800 capitalize">
-                {currentClass}
+                Hidden {/*{currentClass}*/}
               </div>
               <div className="text-xs text-gray-500 mt-1">
-                (Trial {currentTrial + 1}: {trialSequence[currentTrial]})
+                {/*(Trial {currentTrial + 1}: {trialSequence[currentTrial]})*/}
               </div>
             </div>
             
