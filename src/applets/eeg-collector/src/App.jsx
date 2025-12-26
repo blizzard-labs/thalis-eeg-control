@@ -11,8 +11,19 @@ const EEGDataCollector = () => {
   const [sessionStarted, setSessionStarted] = useState(false);
   
   const intervalRef = useRef(null);
-  const startTimeRef = useRef(null);
-  const pausedTimeRef = useRef(0);
+  const phaseRef = useRef(phase);
+  const currentTrialRef = useRef(currentTrial);
+  const isAdvancingRef = useRef(false);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    phaseRef.current = phase;
+    isAdvancingRef.current = false; // Reset flag when phase actually changes
+  }, [phase]);
+
+  useEffect(() => {
+    currentTrialRef.current = currentTrial;
+  }, [currentTrial]);
 
   // Phase durations in seconds
   const PHASE_DURATIONS = {
@@ -50,11 +61,16 @@ const EEGDataCollector = () => {
     if (isRunning && !isPaused) {
       intervalRef.current = setInterval(() => {
         setTimeLeft(prev => {
-          if (prev <= 0.1) {
-            advancePhase();
-            return getNextPhaseDuration();
+          const newTime = prev - 0.1;
+          if (newTime <= 0) {
+            // Prevent multiple advancePhase calls while waiting for state update
+            if (!isAdvancingRef.current) {
+              isAdvancingRef.current = true;
+              setTimeout(() => advancePhase(), 0);
+            }
+            return 0;
           }
-          return prev - 0.1;
+          return newTime;
         });
       }, 100);
     }
@@ -64,46 +80,29 @@ const EEGDataCollector = () => {
         clearInterval(intervalRef.current);
       }
     };
-  }, [isRunning, isPaused, phase, currentTrial]);
-
-  const getNextPhaseDuration = () => {
-    const phases = ['rest', 'cue', 'imagery'];
-    const currentIndex = phases.indexOf(phase);
-    const nextPhase = phases[(currentIndex + 1) % phases.length];
-    return PHASE_DURATIONS[nextPhase];
-  };
+  }, [isRunning, isPaused]);
 
   const advancePhase = () => {
-    const currentClass = trialSequence[currentTrial];
+    const currentPhase = phaseRef.current;
+    const trial = currentTrialRef.current;
     
-    // For rest trials, skip cue and imagery phases
-    if (currentClass === 'rest') {
-      if (phase === 'rest') {
-        // Move to next trial after rest period
-        if (currentTrial >= trialSequence.length - 1) {
-          completeSession();
-        } else {
-          setCurrentTrial(prev => prev + 1);
-          setPhase('rest');
-        }
-      }
-      return;
-    }
-
-    // For motor imagery trials (thumb, index, pinky)
-    switch (phase) {
+    // All trials follow the same sequence: rest -> cue -> imagery
+    switch (currentPhase) {
       case 'rest':
         setPhase('cue');
+        setTimeLeft(PHASE_DURATIONS.cue);
         break;
       case 'cue':
         setPhase('imagery');
+        setTimeLeft(PHASE_DURATIONS.imagery);
         break;
       case 'imagery':
-        if (currentTrial >= trialSequence.length - 1) {
+        if (trial >= trialSequence.length - 1) {
           completeSession();
         } else {
           setCurrentTrial(prev => prev + 1);
           setPhase('rest');
+          setTimeLeft(PHASE_DURATIONS.rest);
         }
         break;
     }
@@ -121,14 +120,10 @@ const EEGDataCollector = () => {
     }
     setIsRunning(true);
     setIsPaused(false);
-    startTimeRef.current = Date.now();
   };
 
   const pauseSession = () => {
     setIsPaused(!isPaused);
-    if (!isPaused) {
-      pausedTimeRef.current = Date.now();
-    }
   };
 
   const resetSession = () => {
@@ -139,6 +134,7 @@ const EEGDataCollector = () => {
     setTimeLeft(5);
     setSessionStarted(false);
     setTrialSequence([]);
+    isAdvancingRef.current = false;
   };
 
   const downloadSequence = () => {
@@ -158,27 +154,24 @@ const EEGDataCollector = () => {
   const currentClass = getCurrentClass();
 
   const getPhaseDisplay = () => {
-    if (currentClass === 'rest') {
-      return 'Rest Period';
-    }
-    
     switch (phase) {
       case 'rest':
         return 'Rest';
       case 'cue':
         return `Cue: ${currentClass.toUpperCase()}`;
       case 'imagery':
-        return 'Motor Imagery';
+        return currentClass === 'rest' ? 'Rest (Motor Imagery Period)' : 'Motor Imagery';
       default:
         return '';
     }
   };
 
   const getBackgroundColor = () => {
-    if (currentClass === 'rest') return 'bg-gray-100';
     if (phase === 'rest') return 'bg-gray-100';
     if (phase === 'cue') return 'bg-blue-100';
-    if (phase === 'imagery') return 'bg-green-100';
+    if (phase === 'imagery') {
+      return currentClass === 'rest' ? 'bg-gray-100' : 'bg-green-100';
+    }
     return 'bg-white';
   };
 
@@ -243,6 +236,9 @@ const EEGDataCollector = () => {
               <div className="text-2xl font-bold text-gray-800 capitalize">
                 {currentClass}
               </div>
+              <div className="text-xs text-gray-500 mt-1">
+                (Trial {currentTrial + 1}: {trialSequence[currentTrial]})
+              </div>
             </div>
             
             <div className="bg-gray-50 p-4 rounded-lg">
@@ -269,15 +265,19 @@ const EEGDataCollector = () => {
                 {getPhaseDisplay()}
               </div>
               
-              {phase === 'cue' && currentClass !== 'rest' && (
+              {phase === 'cue' && (
                 <div className="text-4xl text-gray-600 mt-8">
-                  Prepare to imagine {currentClass} movement
+                  {currentClass === 'rest' 
+                    ? 'Prepare to rest' 
+                    : `Prepare to imagine ${currentClass} movement`}
                 </div>
               )}
               
-              {phase === 'imagery' && currentClass !== 'rest' && (
+              {phase === 'imagery' && (
                 <div className="text-4xl text-gray-600 mt-8">
-                  Imagine moving your {currentClass}
+                  {currentClass === 'rest' 
+                    ? 'Continue resting - no imagery' 
+                    : `Imagine moving your ${currentClass}`}
                 </div>
               )}
 
@@ -300,9 +300,9 @@ const EEGDataCollector = () => {
           <h2 className="text-xl font-bold text-gray-800 mb-3">Instructions</h2>
           <ul className="space-y-2 text-gray-700">
             <li><strong>Rest Period (5s):</strong> Relax and prepare for the next trial</li>
-            <li><strong>Cue Phase (1s):</strong> View which finger to imagine (thumb/index/pinky)</li>
-            <li><strong>Motor Imagery (3s):</strong> Imagine moving the specified finger</li>
-            <li><strong>Rest Trials:</strong> Only show 5s rest period, then proceed to next trial</li>
+            <li><strong>Cue Phase (1s):</strong> View the class (rest/thumb/index/pinky)</li>
+            <li><strong>Motor Imagery (3s):</strong> For finger classes, imagine moving that finger. For rest class, continue resting with no imagery</li>
+            <li><strong>All trials follow the same structure:</strong> Rest (5s) → Cue (1s) → Motor Imagery period (3s)</li>
           </ul>
         </div>
       </div>
