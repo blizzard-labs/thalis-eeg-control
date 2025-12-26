@@ -720,6 +720,56 @@ class EEGPreprocessor:
 
 
 # Convenience function for integration with EEGStream
+def create_multiband_preprocessing_callback(
+    preprocessor: Optional[EEGPreprocessor] = None,
+    output_callback: Optional[callable] = None
+) -> callable:
+    """
+    Create a multiband preprocessing callback for use with EEGStream.on_sample().
+    
+    This callback outputs both alpha and beta bands separately, suitable for
+    use with WindowConfig(use_multiband=True) in pipe.py.
+    
+    Parameters
+    ----------
+    preprocessor : EEGPreprocessor, optional
+        Preprocessor instance. Creates new one if not provided.
+    output_callback : callable, optional
+        Function to call with processed samples.
+        
+    Returns
+    -------
+    callable
+        Callback function for EEGStream.on_sample().
+        
+    Examples
+    --------
+    >>> from unicorneeg.stream import EEGStream, EEGStreamConfig
+    >>> from unicorneeg.clean import create_multiband_preprocessing_callback
+    >>> from unicorneeg.pipe import RealTimeWindowBuffer, WindowConfig
+    >>> 
+    >>> # Setup multiband windowing
+    >>> config = WindowConfig(use_multiband=True)
+    >>> window_buffer = RealTimeWindowBuffer(config=config)
+    >>> 
+    >>> # Create chained callbacks
+    >>> windowing_cb = create_windowing_callback(window_buffer)
+    >>> preprocess_cb = create_multiband_preprocessing_callback(output_callback=windowing_cb)
+    >>> 
+    >>> stream = EEGStream(EEGStreamConfig())
+    >>> stream.on_sample(preprocess_cb)
+    """
+    if preprocessor is None:
+        preprocessor = EEGPreprocessor()
+    
+    def callback(sample: Dict):
+        result = preprocessor.process_sample_multiband(sample)
+        if result is not None and output_callback is not None:
+            output_callback(result)
+    
+    return callback
+
+
 def create_preprocessing_callback(
     preprocessor: Optional[EEGPreprocessor] = None,
     output_callback: Optional[callable] = None,
