@@ -26,6 +26,7 @@ from control.csp_features import (
     SessionNormalizer
 )
 from control.lda_classifier import CSPLDAClassifier, OnlineClassifier, ClassificationResult
+from control.lda_train import train_model, TrainingPipeline, TrainingConfig
 
 
 # =============================================================================
@@ -435,6 +436,17 @@ Latest version: https://github.com/blizzard-labs/thalis-eeg-control
     parser.add_argument("--multiband", action='store_true',
                         help="Use multiband (alpha+beta) preprocessing for collect mode")
     
+    parser.add_argument("--csv", type=str, required=False,
+                        help="Path to raw EEG CSV file (for train mode)")
+    parser.add_argument("--cues", type=str, required=False,
+                        help="Path to cue order txt file (for train mode)")
+    parser.add_argument("--n-components", type=int, default=4,
+                        help="Number of CSP components per pair (for train mode)")
+    parser.add_argument("--start-time", type=float, default=None,
+                        help="Override trial start time in seconds (for train mode)")
+    parser.add_argument("--no-cv", action="store_true",
+                        help="Skip cross-validation (for train mode)")
+    
     args = parser.parse_args()
     print(f"Selected Mode: {args.mode}")
     
@@ -475,15 +487,37 @@ Latest version: https://github.com/blizzard-labs/thalis-eeg-control
     elif args.mode == 'train':
         '''
         TRAIN MODE: Train CSP + LDA model from collected data.
+        
+        Required arguments:
+          --csv   Path to raw EEG CSV file from collect mode
+          --cues  Path to cue order txt file
+          --model Output directory for trained models
+          
+        Optional arguments:
+          --n-components   CSP components per pair (default: 4)
+          --start-time     Override trial start time
+          --no-cv          Skip cross-validation
         '''
-        print("\n[Train Mode] Training not yet implemented in main.py")
-        print("See src/control/csp_features.py and lda_classifier.py for training utilities.")
-        # TODO: Implement training mode
-        # 1. Load labeled windows from CSV files
-        # 2. Prepare dual-band data
-        # 3. Fit DualBandPairwiseCSP
-        # 4. Extract features and fit CSPLDAClassifier
-        # 5. Save models to args.model directory
+        if not args.csv or not args.cues:
+            print("\n[Train Mode] ERROR: --csv and --cues arguments are required for train mode")
+            print("Usage: python main.py --mode train --csv <eeg_data.csv> --cues <cues.txt> --model <output_dir>")
+            sys.exit(1)
+        
+        print(f"\n[Train Mode] Training CSP + LDA classifier")
+        print(f"  CSV file: {args.csv}")
+        print(f"  Cue file: {args.cues}")
+        print(f"  Output: {args.model}")
+        print(f"  CSP components: {args.n_components}")
+        
+        results = train_model(
+            csv_path=args.csv,
+            cue_path=args.cues,
+            output_dir=args.model,
+            n_components=args.n_components,
+            start_time=args.start_time,
+            run_cv=not args.no_cv,
+            verbose=True
+        )
     
     elif args.mode == 'simulate':
         '''
