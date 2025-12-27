@@ -2,21 +2,20 @@
 EEG Stream Module - Object-oriented LSL stream handler for Unicorn EEG devices.
 
 Provides configurable options for:
-- Real-time graphing
+- Real-time visualization console (PyQt6-based)
 - CSV data saving
 - Background thread data collection for concurrent processing
 """
 
 from pylsl import StreamInlet, resolve_byprop
 import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable, Optional, List, Dict, Any
 from pathlib import Path
 import threading
 import time
+import sys
 
 
 @dataclass
@@ -32,7 +31,15 @@ class EEGStreamConfig:
         'AccX', 'AccY', 'AccZ', 'Gyro1', 'Gyro2', 'Gyro3', 'Battery', 'Counter', 'Validation'
     ])
     
-    # Graphing options
+    # EEG channel names (subset of columns for visualization)
+    eeg_channels: List[str] = field(default_factory=lambda: [
+        'FZ', 'C3', 'CZ', 'C4', 'PZ', 'PO7', 'OZ', 'PO8'
+    ])
+    
+    # Visualization options (replaces old matplotlib graphing)
+    enable_visualization: bool = True
+    
+    # Legacy graphing options (deprecated - use enable_visualization)
     enable_graphing: bool = True
     plot_rows: int = 5
     plot_cols: int = 4
@@ -195,81 +202,63 @@ class EEGStream:
         """Check if burn-in period has completed."""
         return self._burn_in_complete
     
-    def _setup_plot(self) -> None:
-        """Initialize matplotlib figure and axes for real-time plotting."""
-        if not self.config.enable_graphing:
+    def _setup_visualization_console(self) -> None:
+        """Initialize the PyQt6 visualization console."""
+        if not self.config.enable_visualization:
             return
+        
+        # Import visualization components
+        try:
+            from tools.visualization import EEGVisualizationConsole, VisualizationConfig
+            from PyQt6.QtWidgets import QApplication
             
-        plot_columns = self.config.plot_columns
-        n_plots = len(plot_columns)
-        rows, cols = self.config.plot_rows, self.config.plot_cols
-        
-        self._fig, self._axes = plt.subplots(
-            rows, cols, 
-            figsize=self.config.figure_size, 
-            sharex=True
-        )
-        axes_flat = self._axes.flatten()
-        
-        self._lines = {}
-        for i, col in enumerate(plot_columns):
-            ax = axes_flat[i]
-            self._lines[col], = ax.plot([], [], lw=1)
-            ax.set_title(col)
-            ax.grid(True, alpha=0.3)
-        
-        # Hide unused axes
-        for j in range(n_plots, rows * cols):
-            self._fig.delaxes(axes_flat[j])
-        
-        plt.tight_layout()
+            # Create QApplication if needed
+            self._app = QApplication.instance()
+            if self._app is None:
+                self._app = QApplication(sys.argv)
+            
+            # Create visualization config
+            viz_config = VisualizationConfig(
+                channel_names=self.config.eeg_channels,
+                sample_rate=self.config.sample_rate,
+                display_seconds=self.config.buffer_seconds,
+            )
+            
+            # Create console
+            self._viz_console = EEGVisualizationConsole(viz_config)
+            self._viz_console.show()
+            
+            # Start console timers
+            self._viz_console.start()
+            
+            print("[Visualization] Console initialized")
+            
+        except ImportError as e:
+            print(f"Warning: Could not import visualization console: {e}")
+            print("Falling back to no visualization.")
+            self.config.enable_visualization = False
+            self._viz_console = None
     
-    def reset_plots(self) -> None:
+    def reset_visualization(self) -> None:
         """
-        Reset all plot lines to empty, clearing displayed data.
+        Reset the visualization console, clearing displayed data.
         
         Called automatically after burn-in period completes to give a fresh start.
         """
-        if not self.config.enable_graphing or self._fig is None:
-            return
-            
-        for col in self.config.plot_columns:
-            if col in self._lines:
-                self._lines[col].set_data([], [])
-                ax = self._lines[col].axes
-                ax.relim()
-                ax.autoscale_view()
-        
-        plt.draw()
+        if hasattr(self, '_viz_console') and self._viz_console is not None:
+            self._viz_console.reset()
     
-    def _update_plot(self) -> None:
-        """Update plot with current buffer contents."""
-        if not self.config.enable_graphing or self._fig is None:
+    def _update_visualization(self) -> None:
+        """Update visualization console with current data."""
+        if not self.config.enable_visualization:
             return
-            
-        with self._lock:
-            t = list(self._data_buffers['Time'])
-            if not t:
-                return
-            t0 = t[0]
-            t_rel = [ti - t0 for ti in t]
-            
-            for col in self.config.plot_columns:
-                y = list(self._data_buffers[col])
-                self._lines[col].set_data(t_rel, y)
-                ax = self._lines[col].axes
-                ax.relim()
-                ax.autoscale_view()
-                
-                #ax.set_xlim(left=0, right=max(t_rel) if t_rel else self.config.buffer_seconds)
-                
-                # Avoid singular xlims (left == right)
-                max_t = max(t_rel) if t_rel else 0
-                right_lim = max_t if max_t > 0 else self.config.buffer_seconds
-                ax.set_xlim(left=0, right=right_lim)
-                
         
-        plt.pause(0.001)
+        if not hasattr(self, '_viz_console') or self._viz_console is None:
+            return
+        
+        if hasattr(self, '_app') and self._app is not None:
+            # Process Qt events
+            self._app.processEvents()
     
     def _collect_sample(self) -> Optional[Dict[str, Any]]:
         """
@@ -322,7 +311,7 @@ class EEGStream:
         elapsed = time.time() - self._start_time
         if elapsed >= self.config.burn_in_seconds:
             self._burn_in_complete = True
-            print(f"\n[Burn-in Complete] {self.config.burn_in_seconds}s burn-in period finished. Resetting buffers and plots...")
+            print(f"\n[Burn-in Complete] {self.config.burn_in_seconds}s burn-in period finished. Resetting buffers...")
             
             # Clear all data buffers - discard burn-in data
             self.clear_buffers()
@@ -330,8 +319,8 @@ class EEGStream:
             # Reset the start time so duration tracking starts fresh
             self._start_time = time.time()
             
-            # Reset plots
-            self.reset_plots()
+            # Reset visualization
+            self.reset_visualization()
             
             # Invoke burn-in complete callbacks (e.g., reset window buffers)
             for callback in self._burn_in_callbacks:
@@ -363,8 +352,8 @@ class EEGStream:
                         self._running = False
                         break
     
-    def _collection_loop_with_plot(self) -> None:
-        """Data collection loop with real-time plotting (must run in main thread)."""
+    def _collection_loop_with_visualization(self) -> None:
+        """Data collection loop with real-time visualization (must run in main thread)."""
         while self._running:
             sample = self._collect_sample()
             if sample is None:
@@ -373,7 +362,8 @@ class EEGStream:
             # Check if burn-in period completed
             self._check_burn_in_complete()
             
-            self._update_plot()
+            # Update visualization (process Qt events)
+            self._update_visualization()
             
             # Check duration limit (only after burn-in complete)
             if self._burn_in_complete or self.config.burn_in_seconds <= 0:
@@ -407,24 +397,29 @@ class EEGStream:
             print(f"[Burn-in] Starting {self.config.burn_in_seconds}s burn-in period. Data will be processed but discarded...")
         
         if self.config.use_background_thread:
-            # Background thread mode - graphing disabled (matplotlib not thread-safe)
-            if self.config.enable_graphing:
-                print("Warning: Graphing disabled in background thread mode (matplotlib is not thread-safe)")
+            # Background thread mode - visualization disabled (Qt not thread-safe from background)
+            if self.config.enable_visualization:
+                print("Warning: Visualization console disabled in background thread mode")
             self._thread = threading.Thread(target=self._collection_loop, daemon=True)
             self._thread.start()
         else:
-            # Foreground mode - can do graphing
-            if self.config.enable_graphing:
-                self._setup_plot()
-            self._collection_loop_with_plot()
+            # Foreground mode - can do visualization
+            if self.config.enable_visualization:
+                self._setup_visualization_console()
+                
+                # Register visualization callback
+                if hasattr(self, '_viz_console') and self._viz_console is not None:
+                    self.on_sample(self._viz_console.create_sample_callback())
+            
+            self._collection_loop_with_visualization()
             
             # Save CSV if enabled
             if self.config.enable_csv_save:
                 self.save_csv()
             
-            # Keep plot open
-            if self.config.enable_graphing:
-                print("Data collection finished. Plot window will remain open. ============================")
+            # Cleanup visualization
+            if self.config.enable_visualization and hasattr(self, '_viz_console') and self._viz_console is not None:
+                print("Data collection finished.")
                 finished = '''
                      ______                      __     __     
                     / ____/___  ____ ___  ____  / /__  / /____ 
@@ -434,9 +429,29 @@ class EEGStream:
                                         /_/                      
                 '''
                 print(finished + '\n\n')
-                plt.show()
+                
+                # Keep Qt app running until window closed
+                if hasattr(self, '_app') and self._app is not None:
+                    self._viz_console.stop()
+                    self._app.exec()
         
         return self
+    
+    def start_with_console(self) -> 'EEGStream':
+        """
+        Start data collection with visualization console.
+        
+        This method enables the visualization console and starts
+        data collection in the main thread.
+        
+        Returns
+        -------
+        EEGStream
+            Self for method chaining.
+        """
+        self.config.enable_visualization = True
+        self.config.use_background_thread = False
+        return self.start()
     
     def stop(self) -> 'EEGStream':
         """
@@ -451,6 +466,11 @@ class EEGStream:
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
+        
+        # Stop visualization console
+        if hasattr(self, '_viz_console') and self._viz_console is not None:
+            self._viz_console.stop()
+        
         return self
     
     def is_running(self) -> bool:
@@ -565,7 +585,7 @@ class EEGStream:
 def collect_eeg(
     duration: float = 60.0,
     stream_name: str = 'UN-2024.06.42',
-    enable_graphing: bool = True,
+    enable_visualization: bool = True,
     csv_path: Optional[str] = 'EEGdata.csv'
 ) -> pd.DataFrame:
     """
@@ -577,8 +597,8 @@ def collect_eeg(
         Collection duration in seconds.
     stream_name : str
         LSL stream name to connect to.
-    enable_graphing : bool
-        Whether to show real-time plot.
+    enable_visualization : bool
+        Whether to show real-time visualization console.
     csv_path : str, optional
         Path to save CSV. Set to None to skip saving.
         
@@ -590,7 +610,8 @@ def collect_eeg(
     config = EEGStreamConfig(
         stream_name=stream_name,
         save_duration_seconds=duration,
-        enable_graphing=enable_graphing,
+        enable_visualization=enable_visualization,
+        enable_graphing=enable_visualization,  # Legacy compat
         enable_csv_save=csv_path is not None,
         csv_path=csv_path or 'EEGdata.csv'
     )
@@ -601,9 +622,13 @@ def collect_eeg(
 
 # Example usage when run directly
 if __name__ == '__main__':
-    # Example 1: Basic usage (same behavior as original script)
-    print("Starting EEG collection with graphing...")
-    stream = EEGStream()
+    # Basic usage with visualization console
+    print("Starting EEG collection with visualization console...")
+    config = EEGStreamConfig(
+        enable_visualization=True,
+        save_duration_seconds=60
+    )
+    stream = EEGStream(config)
     stream.start()
     
     # Example 2: Background collection with processing callback
@@ -612,7 +637,7 @@ if __name__ == '__main__':
     #
     # config = EEGStreamConfig(
     #     use_background_thread=True,
-    #     enable_graphing=False,
+    #     enable_visualization=False,
     #     save_duration_seconds=30
     # )
     # stream = EEGStream(config)
@@ -621,7 +646,7 @@ if __name__ == '__main__':
     # 
     # # Do other work while collecting
     # while stream.is_running():
-    #     print(f"Collected {stream.sample_count} samples, elapsed: {stream.elapsed_time:.1f}s")
+    #     print(f"Collected {stream.sample_count} samples")
     #     time.sleep(1)
     #
     # stream.save_csv('my_data.csv')

@@ -240,10 +240,11 @@ def run_online_classification(
         output_callback=windowing_callback
     )
     
-    # Setup EEG stream
+    # Setup EEG stream with visualization console
     config = ulsl.EEGStreamConfig(
         use_background_thread=True,
-        enable_graphing=graphing,
+        enable_visualization=graphing,
+        enable_graphing=graphing,  # Legacy compat
         save_duration_seconds=duration,
         csv_path=os.path.join("data/streamlogs", run_name + "_eeg_data.csv") if run_name else None,
         burn_in_seconds=burn_in_seconds
@@ -282,7 +283,7 @@ def run_online_classification(
 
 def collect_data(
     background_prcs: bool = False, 
-    graphing: bool = True, 
+    visualization: bool = True, 
     duration: int = 0, 
     run_name: str = "", 
     current_label: int = 0, 
@@ -290,14 +291,14 @@ def collect_data(
     use_multiband: bool = False
 ):
     """
-    Collect EEG data with preprocessing and windowing.
+    Collect EEG data with preprocessing, windowing, and visualization console.
     
     Parameters
     ----------
     background_prcs : bool
         Whether to run stream in background thread
-    graphing : bool
-        Whether to show real-time graph
+    visualization : bool
+        Whether to show real-time visualization console
     duration : int
         Recording duration in seconds (0 = indefinite)
     run_name : str
@@ -341,7 +342,8 @@ def collect_data(
 
     config = ulsl.EEGStreamConfig(
         use_background_thread=background_prcs,
-        enable_graphing=graphing,
+        enable_visualization=visualization,
+        enable_graphing=visualization,  # Legacy compat
         save_duration_seconds=duration,
         csv_path=os.path.join("data/streamlogs", run_name + "_eeg_data.csv"),
         burn_in_seconds=burn_in_seconds
@@ -471,12 +473,19 @@ Latest version: https://github.com/blizzard-labs/thalis-eeg-control
         COLLECT MODE: Collect labeled EEG data for training.
         Use --label to set the class (0=Thumb, 1=Index, 2=Pinky).
         Use --multiband for dual-band features.
+        
+        Launches the EEG Visualization Console with:
+        - Multi-channel time series display (raw/filtered toggle)
+        - RMS amplitude heatmap
+        - Signal quality indicators
+        - Topographic band power map
         '''
         print(f"\n[Collect Mode] Label: {args.label} ({['Thumb', 'Index', 'Pinky'][args.label]})")
         print(f"[Collect Mode] Multiband: {args.multiband}")
+        print("[Collect Mode] Launching visualization console...")
         collect_data(
             background_prcs=False, 
-            graphing=True, 
+            visualization=True, 
             duration=args.duration, 
             run_name=args.name,
             current_label=args.label,
