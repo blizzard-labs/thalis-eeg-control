@@ -424,7 +424,16 @@ class EEGStream:
             
             # Keep plot open
             if self.config.enable_graphing:
-                print("Data collection finished. Plot window will remain open.")
+                print("Data collection finished. Plot window will remain open. ============================")
+                finished = '''
+                     ______                      __     __     
+                    / ____/___  ____ ___  ____  / /__  / /____ 
+                    / /   / __ \/ __ `__ \/ __ \/ / _ \/ __/ _ \\
+                    / /___/ /_/ / / / / / / /_/ / /  __/ /_/  __/
+                    \____/\____/_/ /_/ /_/ .___/_/\___/\__/\___/ 
+                                        /_/                      
+                '''
+                print(finished + '\n\n')
                 plt.show()
         
         return self

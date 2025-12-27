@@ -1,6 +1,11 @@
 First trial run: Data collection
 Phase I Protocol
-Standard Unicorn EEG Electrode Placement
+Standard Unicorn EEG Electrode Placement, w/ Gel
 ~16 minute long
 4 classes: Thumb, Index, Pinky, Rest
 15s burn in period
+
+NOTES:
+- Sucessfull full first trial
+- Bluetooth disconnect in between
+- Unsynchronized start of procedure app and eeg data collection

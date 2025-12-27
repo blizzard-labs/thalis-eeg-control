@@ -1,0 +1,18 @@
+Second trial run: Full 320 Trial Data collection
+Phase I Protocol Full
+Standard Unicorn EEG Electrode Placement, w/ Gel
+~48 minute long procedure
+~52 minute long recording
+4 classes: Thumb, Index, Pinky, Rest
+15s burn in period + Prior Testing with Unicorn Recorder
+
+NOTES:
+- Bluetooth connection issues resolved
+- Strong reading on signal quality from unicorn Recorder
+- issue with full focus for 48 minute long procedure
+- "Motor Imagery": Moving the finger, looking at it, and focusing on that action
+- Glitching behavior with matplotlib plots of raw data
+
+
+- NOT ALL DATA COLLECTED: Check CSV time stamps
+
