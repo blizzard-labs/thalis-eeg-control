@@ -1,0 +1,6 @@
+First trial run: Data collection
+Phase I Protocol
+Standard Unicorn EEG Electrode Placement
+~16 minute long
+4 classes: Thumb, Index, Pinky, Rest
+15s burn in period
