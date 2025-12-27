@@ -8,7 +8,7 @@ multiple visualization widgets for comprehensive EEG monitoring.
 import sys
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Deque
+from typing import Optional, List, Dict, Any, Deque, Callable
 from collections import deque
 import threading
 import time
@@ -16,10 +16,13 @@ import time
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QComboBox, QGroupBox, QSplitter, QFrame,
-    QStatusBar, QToolBar, QCheckBox, QSlider, QSpinBox
+    QStatusBar, QToolBar, QCheckBox, QSlider, QSpinBox, QFileDialog,
+    QProgressBar, QMessageBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
 from PyQt6.QtGui import QAction, QFont, QPalette, QColor
+
+import pandas as pd
 
 import pyqtgraph as pg
 
@@ -227,6 +230,11 @@ class EEGVisualizationConsole(QMainWindow):
         self._selected_band = 'alpha'
         self._running = False
         self._start_time = None
+        self._battery_level = 100  # Battery percentage
+        self._stop_callback = None  # Callback to stop the stream
+        
+        # All collected data buffer (for CSV export)
+        self._all_data: List[dict] = []
         
         # Setup UI
         self._setup_ui()
@@ -422,15 +430,104 @@ class EEGVisualizationConsole(QMainWindow):
         
         toolbar.addSeparator()
         
-        # Spacer
+        # Spacer to push controls to the right
         spacer = QWidget()
         spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy(), spacer.sizePolicy().verticalPolicy())
+        from PyQt6.QtWidgets import QSizePolicy
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
+        
+        # Battery indicator
+        self._create_battery_indicator(toolbar)
+        
+        toolbar.addSeparator()
+        
+        # CSV Download button
+        self.download_btn = QPushButton("📥 Download CSV")
+        self.download_btn.setToolTip("Save all collected EEG data to CSV file")
+        self.download_btn.clicked.connect(self._download_csv)
+        self.download_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #45475a;
+                color: #cdd6f4;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #585b70;
+            }
+        """)
+        toolbar.addWidget(self.download_btn)
+        
+        toolbar.addSeparator()
+        
+        # Stop button
+        self.stop_btn = QPushButton("⏹ Stop Stream")
+        self.stop_btn.setToolTip("Stop the EEG stream and data collection")
+        self.stop_btn.clicked.connect(self._stop_stream)
+        self.stop_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f38ba8;
+                color: #1e1e2e;
+                font-weight: bold;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #eba0ac;
+            }
+            QPushButton:disabled {
+                background-color: #45475a;
+                color: #6c7086;
+            }
+        """)
+        toolbar.addWidget(self.stop_btn)
+        
+        toolbar.addSeparator()
         
         # Recording indicator
         self.recording_label = QLabel("● LIVE")
         self.recording_label.setStyleSheet(f"color: {self.config.colors['good']}; font-weight: bold;")
         toolbar.addWidget(self.recording_label)
+    
+    def _create_battery_indicator(self, toolbar: QToolBar):
+        """Create battery indicator widget."""
+        # Battery container
+        battery_container = QWidget()
+        battery_layout = QHBoxLayout(battery_container)
+        battery_layout.setContentsMargins(4, 0, 4, 0)
+        battery_layout.setSpacing(6)
+        
+        # Battery icon label
+        self.battery_icon = QLabel("🔋")
+        self.battery_icon.setStyleSheet("font-size: 16px;")
+        battery_layout.addWidget(self.battery_icon)
+        
+        # Battery percentage label
+        self.battery_label = QLabel("---%")
+        self.battery_label.setMinimumWidth(45)
+        self.battery_label.setStyleSheet(f"color: {self.config.colors['good']}; font-weight: bold;")
+        battery_layout.addWidget(self.battery_label)
+        
+        # Battery progress bar
+        self.battery_bar = QProgressBar()
+        self.battery_bar.setRange(0, 100)
+        self.battery_bar.setValue(100)
+        self.battery_bar.setFixedWidth(60)
+        self.battery_bar.setFixedHeight(16)
+        self.battery_bar.setTextVisible(False)
+        self.battery_bar.setStyleSheet(f"""
+            QProgressBar {{
+                border: 1px solid {self.config.colors['grid']};
+                border-radius: 4px;
+                background-color: {self.config.colors['grid']};
+            }}
+            QProgressBar::chunk {{
+                background-color: {self.config.colors['good']};
+                border-radius: 3px;
+            }}
+        """)
+        battery_layout.addWidget(self.battery_bar)
+        
+        toolbar.addWidget(battery_container)
     
     def _create_time_series_widget(self) -> QGroupBox:
         """Create the multi-channel time series plot widget."""
@@ -537,6 +634,117 @@ class EEGVisualizationConsole(QMainWindow):
         """Change the Y-axis scale."""
         self.time_series_plot.set_y_range((-value, value))
     
+    def _update_battery(self, level: float):
+        """Update the battery indicator with new level."""
+        # Convert to percentage (0-100)
+        level = max(0, min(100, level))
+        self._battery_level = level
+        
+        # Update label
+        self.battery_label.setText(f"{int(level)}%")
+        
+        # Update progress bar
+        self.battery_bar.setValue(int(level))
+        
+        # Update colors based on level
+        if level >= 50:
+            color = self.config.colors['good']
+            icon = "🔋"
+        elif level >= 20:
+            color = self.config.colors['moderate']
+            icon = "🔋"
+        else:
+            color = self.config.colors['bad']
+            icon = "🪫"
+        
+        self.battery_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+        self.battery_icon.setText(icon)
+        self.battery_bar.setStyleSheet(f"""
+            QProgressBar {{
+                border: 1px solid {self.config.colors['grid']};
+                border-radius: 4px;
+                background-color: {self.config.colors['grid']};
+            }}
+            QProgressBar::chunk {{
+                background-color: {color};
+                border-radius: 3px;
+            }}
+        """)
+    
+    def _stop_stream(self):
+        """Stop the EEG stream."""
+        reply = QMessageBox.question(
+            self,
+            "Stop Stream",
+            "Are you sure you want to stop the EEG stream?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # Update UI
+            self.stop_btn.setEnabled(False)
+            self.recording_label.setText("● STOPPED")
+            self.recording_label.setStyleSheet(f"color: {self.config.colors['bad']}; font-weight: bold;")
+            
+            # Call stop callback if set
+            if self._stop_callback is not None:
+                self._stop_callback()
+            
+            self._update_status(f"Stream stopped. {len(self._all_data)} samples collected.")
+    
+    def set_stop_callback(self, callback: Callable):
+        """
+        Set a callback function to be called when stop button is pressed.
+        
+        Parameters
+        ----------
+        callback : callable
+            Function to call when stopping the stream.
+        """
+        self._stop_callback = callback
+    
+    def _download_csv(self):
+        """Download collected data as CSV file."""
+        if not self._all_data:
+            QMessageBox.warning(
+                self,
+                "No Data",
+                "No data has been collected yet. Start streaming first.",
+                QMessageBox.StandardButton.Ok
+            )
+            return
+        
+        # Show save file dialog
+        default_name = f"eeg_data_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save EEG Data",
+            default_name,
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                # Convert to DataFrame and save
+                df = pd.DataFrame(self._all_data)
+                df.to_csv(file_path, index=False)
+                
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Saved {len(self._all_data)} samples to:\n{file_path}",
+                    QMessageBox.StandardButton.Ok
+                )
+                self._update_status(f"Data saved to {file_path}")
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to save data:\n{str(e)}",
+                    QMessageBox.StandardButton.Ok
+                )
+
     def _handle_data(self, sample: dict):
         """Handle incoming data (called from signal)."""
         # Extract EEG channels
@@ -547,6 +755,14 @@ class EEGVisualizationConsole(QMainWindow):
         
         # Add to buffer
         self.data_buffer.add_sample(eeg_data, timestamp)
+        
+        # Store sample for CSV export
+        self._all_data.append(sample.copy())
+        
+        # Update battery level
+        battery = sample.get('Battery', None)
+        if battery is not None:
+            self._update_battery(battery)
     
     def _update_plots(self):
         """Update the time series and heatmap plots."""

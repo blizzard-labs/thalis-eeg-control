@@ -416,9 +416,9 @@ Latest version: https://github.com/blizzard-labs/thalis-eeg-control
     parser.add_argument("--name", type=str, required=False, default="run",
                         help="Name for this run (used for logging)")
     
-    parser.add_argument("--duration", type=int, default=100,
+    parser.add_argument("--duration", type=int, default=0,
                         required=False, 
-                        help="Duration for data collection in seconds (default: 100s)")
+                        help="Duration for data collection in seconds (default: 0 = indefinite, stop from console)")
     
     parser.add_argument("--burn-in", type=float, default=15.0,
                         required=False, 

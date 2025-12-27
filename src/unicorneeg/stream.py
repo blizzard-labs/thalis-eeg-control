@@ -228,6 +228,9 @@ class EEGStream:
             self._viz_console = EEGVisualizationConsole(viz_config)
             self._viz_console.show()
             
+            # Register stop callback so console can stop the stream
+            self._viz_console.set_stop_callback(self._handle_console_stop)
+            
             # Start console timers
             self._viz_console.start()
             
@@ -238,6 +241,11 @@ class EEGStream:
             print("Falling back to no visualization.")
             self.config.enable_visualization = False
             self._viz_console = None
+    
+    def _handle_console_stop(self) -> None:
+        """Handle stop request from visualization console."""
+        print("\n[Stream] Stop requested from visualization console...")
+        self._running = False
     
     def reset_visualization(self) -> None:
         """
@@ -365,7 +373,8 @@ class EEGStream:
             # Update visualization (process Qt events)
             self._update_visualization()
             
-            # Check duration limit (only after burn-in complete)
+            # Check duration limit (only after burn-in complete, and only if duration > 0)
+            # Duration of 0 means "indefinite" - run until stopped from console
             if self._burn_in_complete or self.config.burn_in_seconds <= 0:
                 if self.config.save_duration_seconds > 0:
                     elapsed = time.time() - self._start_time
