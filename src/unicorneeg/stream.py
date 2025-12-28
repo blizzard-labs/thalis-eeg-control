@@ -432,7 +432,9 @@ class EEGStream:
             
             # Save CSV if enabled
             if self.config.enable_csv_save:
-                self.save_csv()
+                #self.save_csv()
+                #! Permanantly disabled CSV saving here
+                pass
             
             # Cleanup visualization
             if self.config.enable_visualization and hasattr(self, '_viz_console') and self._viz_console is not None:
@@ -595,7 +597,9 @@ class EEGStream:
         """Context manager exit."""
         self.stop()
         if self.config.enable_csv_save and self.sample_count > 0:
-            self.save_csv()
+            #self.save_csv()
+            #! Permanantly disabled CSV saving here
+            pass
 
 
 # Convenience function for quick usage

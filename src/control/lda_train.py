@@ -2,7 +2,7 @@
 Training pipeline for CSP + LDA classifier from collected EEG data.
 
 Trial structure:
-    2s Rest → 1s Cue → 3s Motor Imagery → 2s Inter-trial Rest [REPEAT for 320 trials]
+    5s Rest → 1s Cue → 3s Motor Imagery [REPEAT for 320 trials]
     
 The Motor Imagery period (3s) is used for training.
 
@@ -48,10 +48,9 @@ class TrialConfig:
     """Configuration for trial structure."""
     
     # Trial timing (in seconds)
-    rest_duration: float = 2.0       # Initial rest period
+    rest_duration: float = 5.0       # Initial rest period
     cue_duration: float = 1.0        # Cue presentation
     mi_duration: float = 3.0         # Motor imagery (training data)
-    iti_duration: float = 2.0        # Inter-trial interval
     
     # Sampling rate (raw data from Unicorn)
     raw_sample_rate: int = 250       # Hz (native Unicorn rate)
@@ -72,7 +71,7 @@ class TrialConfig:
     @property
     def trial_duration(self) -> float:
         """Total duration of one trial in seconds."""
-        return self.rest_duration + self.cue_duration + self.mi_duration + self.iti_duration
+        return self.rest_duration + self.cue_duration + self.mi_duration 
     
     @property
     def mi_start_offset(self) -> float:
@@ -136,28 +135,16 @@ def parse_cue_file(cue_filepath: str) -> List[str]:
     Returns
     -------
     cues : list of str
-        List of cue labels ('Thumb', 'Index', 'Pinky')
+        List of cue labels ('thumb', 'index', 'pinky')
     """
     cues = []
     with open(cue_filepath, 'r') as f:
         for line in f:
             cue = line.strip()
             if cue:
-                # Normalize cue names
-                cue_lower = cue.lower()
-                if 'thumb' in cue_lower:
-                    cues.append('Thumb')
-                elif 'index' in cue_lower:
-                    cues.append('Index')
-                elif 'pinky' in cue_lower or 'little' in cue_lower:
-                    cues.append('Pinky')
-                else:
-                    # Try to parse as number (0, 1, 2)
-                    try:
-                        idx = int(cue)
-                        cues.append(['Thumb', 'Index', 'Pinky'][idx])
-                    except (ValueError, IndexError):
-                        raise ValueError(f"Unknown cue: '{cue}'")
+                if cue.lower() in ['thumb', 'index', 'pinky']:
+                    cues.append(cue.capitalize())
+                
     return cues
 
 
@@ -212,7 +199,7 @@ def segment_trials(
     trials : list of dict
         List of trial dictionaries with 'data' (MI period) and 'label'.
     """
-    if start_time is None:
+    if start_time is None: 
         start_time = df['Time'].iloc[0]
     
     eeg_channels = ['FZ', 'C3', 'CZ', 'C4', 'PZ', 'PO7', 'OZ', 'PO8']

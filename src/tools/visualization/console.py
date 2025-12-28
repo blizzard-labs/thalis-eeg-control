@@ -12,6 +12,9 @@ from typing import Optional, List, Dict, Any, Deque, Callable
 from collections import deque
 import threading
 import time
+import csv
+import tempfile
+from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -67,6 +70,16 @@ class VisualizationConfig:
     plot_update_rate: int = 30  # Hz (target frame rate)
     quality_update_rate: int = 2  # Hz (quality indicators)
     topomap_update_rate: int = 4  # Hz (topographic map)
+    
+    # Signal emission batching (to reduce Qt event queue pressure)
+    # At 250 Hz sample rate with batch_size=5, signals are emitted at 50 Hz
+    # Higher batch_size = less frequent updates = better performance
+    signal_batch_size: int = 5  # Emit signal every N samples
+    
+    # CSV buffering settings (to prevent unbounded memory growth)
+    # Samples are buffered in memory and flushed to temp file periodically
+    csv_buffer_size: int = 5000  # Flush to disk every N samples (20 seconds at 250 Hz)
+    enable_csv_buffering: bool = True  # Enable incremental CSV writing
     
     # Band definitions for band power calculation
     bands: Dict[str, tuple] = field(default_factory=lambda: {
@@ -234,8 +247,33 @@ class EEGVisualizationConsole(QMainWindow):
         self._stop_callback = None  # Callback to stop the stream
         self._burn_in_complete = False  # Track if burn-in period is done
         
-        # All collected data buffer (for CSV export - only after burn-in)
-        self._all_data: List[dict] = []
+        # CSV buffering for incremental writing (prevents unbounded memory growth)
+        if self.config.enable_csv_buffering:
+            # Create temporary file for incremental CSV writing
+            self._csv_temp_file = tempfile.NamedTemporaryFile(
+                mode='w', 
+                delete=False, 
+                newline='',
+                suffix='.csv',
+                prefix='eeg_temp_'
+            )
+            self._csv_writer = None  # Will be initialized on first sample
+            self._csv_columns = None  # Will be set from first sample
+            self._csv_buffer: List[dict] = []
+            self._csv_samples_written = 0
+            print(f"[CSV Buffering] Temp file: {self._csv_temp_file.name}")
+        else:
+            # Original behavior: keep all data in memory
+            self._csv_temp_file = None
+            self._csv_writer = None
+            self._csv_columns = None
+            self._csv_buffer = []
+            self._csv_samples_written = 0
+        
+        # Batched signal emission to reduce Qt event queue pressure
+        # At 250 Hz, batch_size=5 means emit signals at 50 Hz (every 20ms)
+        self._sample_batch: List[dict] = []
+        self._batch_size = self.config.signal_batch_size
         
         # Setup UI
         self._setup_ui()
@@ -692,7 +730,13 @@ class EEGVisualizationConsole(QMainWindow):
             if self._stop_callback is not None:
                 self._stop_callback()
             
-            self._update_status(f"Stream stopped. {len(self._all_data)} samples collected.")
+            # Calculate total samples for status message
+            if self.config.enable_csv_buffering:
+                total_samples = self._csv_samples_written + len(self._csv_buffer)
+            else:
+                total_samples = len(self._csv_buffer)
+            
+            self._update_status(f"Stream stopped. {total_samples} samples collected.")
     
     def set_stop_callback(self, callback: Callable):
         """
@@ -707,7 +751,13 @@ class EEGVisualizationConsole(QMainWindow):
     
     def _download_csv(self):
         """Download collected data as CSV file."""
-        if not self._all_data:
+        # Calculate total samples
+        if self.config.enable_csv_buffering:
+            total_samples = self._csv_samples_written + len(self._csv_buffer)
+        else:
+            total_samples = len(self._csv_buffer)
+        
+        if total_samples == 0:
             QMessageBox.warning(
                 self,
                 "No Data",
@@ -727,14 +777,45 @@ class EEGVisualizationConsole(QMainWindow):
         
         if file_path:
             try:
-                # Convert to DataFrame and save
-                df = pd.DataFrame(self._all_data)
-                df.to_csv(file_path, index=False)
+                if self.config.enable_csv_buffering:
+                    # Flush any remaining buffered samples
+                    self._flush_csv_buffer()
+                    
+                    # Close temp file for reading
+                    self._csv_temp_file.close()
+                    
+                    # Read temp file and write to destination
+                    # This ensures proper handling of large files
+                    temp_path = Path(self._csv_temp_file.name)
+                    df = pd.read_csv(temp_path)
+                    
+                    # Optionally sort by timestamp (fixes out-of-order issue)
+                    if 'Time' in df.columns:
+                        df = df.sort_values('Time').reset_index(drop=True)
+                        print(f"[CSV Download] Sorted {len(df)} samples by timestamp")
+                    
+                    df.to_csv(file_path, index=False)
+                    
+                    # Reopen temp file for continued writing
+                    self._csv_temp_file = open(temp_path, 'a', newline='')
+                    
+                    total_samples = len(df)
+                else:
+                    # Original behavior: convert in-memory buffer to DataFrame
+                    df = pd.DataFrame(self._csv_buffer)
+                    
+                    # Optionally sort by timestamp (fixes out-of-order issue)
+                    if 'Time' in df.columns:
+                        df = df.sort_values('Time').reset_index(drop=True)
+                        print(f"[CSV Download] Sorted {len(df)} samples by timestamp")
+                    
+                    df.to_csv(file_path, index=False)
+                    total_samples = len(df)
                 
                 QMessageBox.information(
                     self,
                     "Success",
-                    f"Saved {len(self._all_data)} samples to:\n{file_path}",
+                    f"Saved {total_samples} samples to:\n{file_path}",
                     QMessageBox.StandardButton.Ok
                 )
                 self._update_status(f"Data saved to {file_path}")
@@ -759,12 +840,59 @@ class EEGVisualizationConsole(QMainWindow):
         
         # Store sample for CSV export (only after burn-in complete)
         if self._burn_in_complete:
-            self._all_data.append(sample.copy())
+            if self.config.enable_csv_buffering:
+                self._buffer_csv_sample(sample)
+            else:
+                # Original behavior: keep all in memory
+                self._csv_buffer.append(sample.copy())
         
         # Update battery level
         battery = sample.get('Battery', None)
         if battery is not None:
             self._update_battery(battery)
+    
+    def _buffer_csv_sample(self, sample: dict):
+        """
+        Buffer sample for CSV export with periodic flushing to disk.
+        
+        Parameters
+        ----------
+        sample : dict
+            Sample data dictionary.
+        """
+        # Initialize CSV writer on first sample
+        if self._csv_writer is None:
+            self._csv_columns = list(sample.keys())
+            self._csv_writer = csv.DictWriter(
+                self._csv_temp_file,
+                fieldnames=self._csv_columns
+            )
+            self._csv_writer.writeheader()
+            self._csv_temp_file.flush()
+        
+        # Add to buffer
+        self._csv_buffer.append(sample.copy())
+        
+        # Flush to disk when buffer is full
+        if len(self._csv_buffer) >= self.config.csv_buffer_size:
+            self._flush_csv_buffer()
+    
+    def _flush_csv_buffer(self):
+        """Flush buffered samples to temporary CSV file."""
+        if not self._csv_buffer or self._csv_writer is None:
+            return
+        
+        # Write all buffered samples
+        self._csv_writer.writerows(self._csv_buffer)
+        self._csv_temp_file.flush()
+        
+        # Update count and clear buffer
+        self._csv_samples_written += len(self._csv_buffer)
+        self._csv_buffer.clear()
+        
+        # Update status
+        if self._csv_samples_written % 50000 == 0:  # Update every 50k samples
+            print(f"[CSV Buffering] Written {self._csv_samples_written} samples to temp file")
     
     def _update_plots(self):
         """Update the time series and heatmap plots."""
@@ -824,14 +952,25 @@ class EEGVisualizationConsole(QMainWindow):
         """
         Create a callback function for EEGStream.on_sample().
         
+        Uses batched signal emission to reduce Qt event queue pressure.
+        At 250 Hz sample rate with batch_size=5, signals are emitted at 50 Hz.
+        
         Returns
         -------
         callable
             Callback function that adds samples to the visualization.
         """
         def callback(sample: dict):
-            # Emit signal for thread-safe GUI update
-            self.data_received.emit(sample)
+            # Add sample to batch
+            self._sample_batch.append(sample)
+            
+            # Emit signal when batch is full
+            if len(self._sample_batch) >= self._batch_size:
+                # Process all samples in batch
+                for s in self._sample_batch:
+                    self.data_received.emit(s)
+                # Clear batch
+                self._sample_batch.clear()
         
         return callback
     
@@ -862,10 +1001,26 @@ class EEGVisualizationConsole(QMainWindow):
     def stop(self):
         """Stop the visualization timers."""
         self._running = False
+        
+        # Flush any remaining samples in signal batch
+        self._flush_sample_batch()
+        
+        # Flush any remaining CSV data
+        if self.config.enable_csv_buffering:
+            self._flush_csv_buffer()
+            print(f"[CSV Buffering] Final flush: {self._csv_samples_written} total samples written")
+        
         self.plot_timer.stop()
         self.quality_timer.stop()
         self.topomap_timer.stop()
         self._update_status("Stopped")
+    
+    def _flush_sample_batch(self):
+        """Flush any remaining samples in the batch buffer."""
+        if self._sample_batch:
+            for s in self._sample_batch:
+                self.data_received.emit(s)
+            self._sample_batch.clear()
     
     def reset(self):
         """Reset the visualization (clear buffers)."""
@@ -888,12 +1043,26 @@ class EEGVisualizationConsole(QMainWindow):
         self._burn_in_complete = complete
         if complete:
             # Clear any data that may have been collected during burn-in
-            self._all_data.clear()
+            self._csv_buffer.clear()
+            if self.config.enable_csv_buffering:
+                self._csv_samples_written = 0
             self._update_status("Burn-in complete. Recording data...")
     
     def closeEvent(self, event):
         """Handle window close event."""
         self.stop()
+        
+        # Clean up temp file if using CSV buffering
+        if self.config.enable_csv_buffering and self._csv_temp_file is not None:
+            try:
+                self._csv_temp_file.close()
+                temp_path = Path(self._csv_temp_file.name)
+                if temp_path.exists():
+                    temp_path.unlink()
+                    print(f"[CSV Buffering] Cleaned up temp file: {temp_path}")
+            except Exception as e:
+                print(f"[CSV Buffering] Error cleaning up temp file: {e}")
+        
         event.accept()
 
 

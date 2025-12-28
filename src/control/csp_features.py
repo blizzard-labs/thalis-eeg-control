@@ -3,8 +3,8 @@ Pairwise Common Spatial Pattern (CSP) Feature Extraction Module.
 
 Implements one-vs-one pairwise CSP for three-class motor imagery classification:
 - Thumb vs Index
-- Index vs Pinky  
 - Thumb vs Pinky
+- Index vs Pinky
 
 Features are extracted separately for alpha (8-13 Hz) and beta (13-30 Hz) bands,
 producing 24 total features: 4 components × 3 pairs × 2 bands.
