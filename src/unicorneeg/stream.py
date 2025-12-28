@@ -330,6 +330,10 @@ class EEGStream:
             # Reset visualization
             self.reset_visualization()
             
+            # Notify visualization console that burn-in is complete (for CSV export)
+            if hasattr(self, '_viz_console') and self._viz_console is not None:
+                self._viz_console.set_burn_in_complete(True)
+            
             # Invoke burn-in complete callbacks (e.g., reset window buffers)
             for callback in self._burn_in_callbacks:
                 try:
@@ -419,6 +423,10 @@ class EEGStream:
                 # Register visualization callback
                 if hasattr(self, '_viz_console') and self._viz_console is not None:
                     self.on_sample(self._viz_console.create_sample_callback())
+                    
+                    # If no burn-in period, mark console as ready for data collection immediately
+                    if self.config.burn_in_seconds <= 0:
+                        self._viz_console.set_burn_in_complete(True)
             
             self._collection_loop_with_visualization()
             

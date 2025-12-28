@@ -1,0 +1,23 @@
+Third Trial Run: Full 320 Trial Data collection
+Phase I Protocol
+Standard Unicorn EEG Electrode Placement w/ Gel
+~48 minute lon gprocedure
+4 classes: Thumb, index, pinky, Rest
+15s burn in period + Prior Testing with Unicorn Recorder
+
+"Good Signal Check": Pass
+
+OBSERVATIONS:
+- Raw Trace Recording split into three phases: (1) regular measurement (2) lower frequency (3) complete Glitching
+--> Could be cause of multithreading/processsing issues?
+--> Related issue?: CSV file is unordered for larger time entries
+- No Known Bluetooth connection issues
+- Complete Dataset collected, however unordered
+- How to begin testing procedure + data collection simultaneously?
+- Electrode PQ7 Extremely tight... painful
+- Hand movement not observed in phone camera: record with laptop next time
+
+MORE CONSOLE SPECIFIC ISSUES:
+- "Filtered data" not showing
+- Signal "quality" innacurate
+- RMS Error not working

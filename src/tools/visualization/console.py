@@ -232,8 +232,9 @@ class EEGVisualizationConsole(QMainWindow):
         self._start_time = None
         self._battery_level = 100  # Battery percentage
         self._stop_callback = None  # Callback to stop the stream
+        self._burn_in_complete = False  # Track if burn-in period is done
         
-        # All collected data buffer (for CSV export)
+        # All collected data buffer (for CSV export - only after burn-in)
         self._all_data: List[dict] = []
         
         # Setup UI
@@ -756,8 +757,9 @@ class EEGVisualizationConsole(QMainWindow):
         # Add to buffer
         self.data_buffer.add_sample(eeg_data, timestamp)
         
-        # Store sample for CSV export
-        self._all_data.append(sample.copy())
+        # Store sample for CSV export (only after burn-in complete)
+        if self._burn_in_complete:
+            self._all_data.append(sample.copy())
         
         # Update battery level
         battery = sample.get('Battery', None)
@@ -872,6 +874,22 @@ class EEGVisualizationConsole(QMainWindow):
         self.heatmap_plot.clear()
         self.quality_plot.clear()
         self.topomap_plot.clear()
+    
+    def set_burn_in_complete(self, complete: bool = True):
+        """
+        Mark burn-in period as complete. Data collection for CSV export
+        only begins after burn-in is marked complete.
+        
+        Parameters
+        ----------
+        complete : bool
+            Whether burn-in is complete (default: True)
+        """
+        self._burn_in_complete = complete
+        if complete:
+            # Clear any data that may have been collected during burn-in
+            self._all_data.clear()
+            self._update_status("Burn-in complete. Recording data...")
     
     def closeEvent(self, event):
         """Handle window close event."""
