@@ -7,6 +7,13 @@ Standard Unicorn EEG Electrode Placement w/ Gel
 
 "Good Signal Check": Pass
 
+TIME BOOKMARKS [Raw Data Time, Screen Record, Actual Time]: 
+- [12124.8193381s, 00:01, 14:42:45] EEG Data Collection Begins
+- [_____________s, 00:01, 14:42:46] Visual Console Initiated
+- [12139.8109748s, 00:05, 14:43:01] Trial Data Collection Starts (Burn-in over)
+- [15019.6849389s, 12:22, 15:32:05] Trial Data Collection Ends 
+- [15088.5783680s, 12:25, 15:32:17] EEG Stream Ends
+
 OBSERVATIONS:
 - Raw Trace Recording split into three phases: (1) regular measurement (2) lower frequency (3) complete Glitching
 --> Could be cause of multithreading/processsing issues?
@@ -15,7 +22,7 @@ OBSERVATIONS:
 - Complete Dataset collected, however unordered
 - How to begin testing procedure + data collection simultaneously?
 - Electrode PQ7 Extremely tight... painful
-- Hand movement not observed in phone camera: record with laptop next time
+- Hand movement not observed in phone camera: record with laptop next time + shutdown mid recording
 
 MORE CONSOLE SPECIFIC ISSUES:
 - "Filtered data" not showing
