@@ -1,0 +1,17 @@
+{
+  "n_trials": 240,
+  "n_windows": 190,
+  "class_distribution": {
+    "0": 79,
+    "1": 67,
+    "2": 44
+  },
+  "n_csp_components": 4,
+  "csp_regularization": "ledoit_wolf",
+  "class_labels": [
+    "Thumb",
+    "Index",
+    "Pinky"
+  ],
+  "n_features": 24
+}

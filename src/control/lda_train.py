@@ -8,7 +8,8 @@ The Motor Imagery period (3s) is used for training.
 
 Input files:
     - CSV: Raw EEG data collected with 'collect' mode (~250Hz)
-    - TXT: Cue order file with one cue per line (Thumb, Index, or Pinky)
+    - TXT: Cue order file with one cue per line (Thumb, Index, Pinky, or Rest)
+           Note: "Rest" cues are parsed but SKIPPED during analysis/training
 
 Output:
     - csp_model.pkl: Fitted DualBandPairwiseCSP
@@ -135,14 +136,16 @@ def parse_cue_file(cue_filepath: str) -> List[str]:
     Returns
     -------
     cues : list of str
-        List of cue labels ('thumb', 'index', 'pinky')
+        List of cue labels ('Thumb', 'Index', 'Pinky', 'Rest')
+        Note: 'Rest' cues are included in the list but will be filtered
+              out during trial segmentation (not used for training).
     """
     cues = []
     with open(cue_filepath, 'r') as f:
         for line in f:
             cue = line.strip()
             if cue:
-                if cue.lower() in ['thumb', 'index', 'pinky']:
+                if cue.lower() in ['thumb', 'index', 'pinky', 'rest']:
                     cues.append(cue.capitalize())
                 
     return cues
@@ -183,12 +186,15 @@ def segment_trials(
     """
     Segment raw EEG data into trials based on trial structure.
     
+    Trials with cue='Rest' are SKIPPED and not included in output.
+    
     Parameters
     ----------
     df : DataFrame
         Raw EEG data.
     cues : list of str
         Ordered list of cue labels for each trial.
+        Can include 'Rest' which will be skipped.
     config : TrialConfig
         Trial timing configuration.
     start_time : float, optional
@@ -198,6 +204,7 @@ def segment_trials(
     -------
     trials : list of dict
         List of trial dictionaries with 'data' (MI period) and 'label'.
+        'Rest' trials are excluded from this list.
     """
     if start_time is None: 
         start_time = df['Time'].iloc[0]
@@ -205,8 +212,14 @@ def segment_trials(
     eeg_channels = ['FZ', 'C3', 'CZ', 'C4', 'PZ', 'PO7', 'OZ', 'PO8']
     
     trials = []
+    skipped_rest_count = 0
     
     for trial_idx, cue in enumerate(cues):
+        # Skip Rest trials - they are recorded but not used for training
+        if cue.lower() == 'rest':
+            skipped_rest_count += 1
+            continue
+        
         # Calculate trial boundaries
         trial_start = start_time + trial_idx * config.trial_duration
         mi_start = trial_start + config.mi_start_offset
@@ -217,10 +230,10 @@ def segment_trials(
         trial_data = df.loc[mask, ['Time'] + eeg_channels].copy()
         
         if len(trial_data) == 0:
-            print(f"Warning: Trial {trial_idx} has no data (time: {mi_start:.2f}-{mi_end:.2f})")
+            print(f"Warning: Trial {trial_idx} ({cue}) has no data (time: {mi_start:.2f}-{mi_end:.2f})")
             continue
         
-        # Convert label string to index
+        # Convert label string to index (only for non-Rest classes)
         label_idx = config.class_labels.index(cue)
         
         trials.append({
@@ -232,6 +245,9 @@ def segment_trials(
             'mi_end': mi_end,
             'n_samples': len(trial_data)
         })
+    
+    if skipped_rest_count > 0:
+        print(f"  Skipped {skipped_rest_count} 'Rest' trials (not used for training)")
     
     return trials
 
@@ -262,24 +278,46 @@ def preprocess_trials(
     preprocessor = EEGPreprocessor()
     
     processed_trials = []
+    skipped_short_trials = 0
     
     for i, trial in enumerate(trials):
         if verbose and i % 50 == 0:
             print(f"  Preprocessing trial {i+1}/{len(trials)}...")
         
-        # Process batch with multiband output
-        processed = preprocessor.process_batch_multiband(
-            trial['data'], 
-            include_time=False
-        )
+        # Check if trial has enough samples for filtering (need at least 28 samples)
+        # The filter requires padlen=27, so we need more than that
+        if len(trial['data']) < 30:
+            if verbose:
+                print(f"  Warning: Trial {trial['trial_idx']} ({trial['label_name']}) "
+                      f"has only {len(trial['data'])} samples, skipping (need >= 30)")
+            skipped_short_trials += 1
+            continue
         
-        # processed shape: (n_samples_downsampled, 16) [8 alpha + 8 beta]
-        processed_trials.append({
-            'trial_idx': trial['trial_idx'],
-            'data': processed,  # numpy array (n_samples, 16)
-            'label': trial['label'],
-            'label_name': trial['label_name']
-        })
+        try:
+            # Process batch with multiband output
+            processed = preprocessor.process_batch_multiband(
+                trial['data'], 
+                include_time=False
+            )
+            
+            # processed shape: (n_samples_downsampled, 16) [8 alpha + 8 beta]
+            processed_trials.append({
+                'trial_idx': trial['trial_idx'],
+                'data': processed,  # numpy array (n_samples, 16)
+                'label': trial['label'],
+                'label_name': trial['label_name']
+            })
+        except ValueError as e:
+            if "padlen" in str(e):
+                if verbose:
+                    print(f"  Warning: Trial {trial['trial_idx']} ({trial['label_name']}) "
+                          f"failed filtering (too short), skipping")
+                skipped_short_trials += 1
+            else:
+                raise
+    
+    if skipped_short_trials > 0 and verbose:
+        print(f"  Skipped {skipped_short_trials} trials due to insufficient data length")
     
     return processed_trials
 
@@ -501,7 +539,7 @@ class TrainingPipeline:
         
         if self.config.verbose:
             print(f"  CSP fitted with {csp_config.n_components} components per pair")
-            print(f"  Total features: {self.csp_model.n_features_}")
+            print(f"  Total features: {self.csp_model.config.total_features}")
         
         # Extract features
         X_features = self.csp_model.transform(X_alpha, X_beta)
@@ -665,13 +703,13 @@ class TrainingPipeline:
         # Save training metadata
         import json
         metadata = {
-            'n_trials': self.n_trials,
-            'n_windows': self.n_windows,
-            'class_distribution': {str(k): v for k, v in self.class_distribution.items()},
-            'n_csp_components': self.config.n_csp_components,
+            'n_trials': int(self.n_trials),
+            'n_windows': int(self.n_windows),
+            'class_distribution': {str(k): int(v) for k, v in self.class_distribution.items()},
+            'n_csp_components': int(self.config.n_csp_components),
             'csp_regularization': self.config.csp_regularization,
             'class_labels': self.config.trial_config.class_labels,
-            'n_features': self.csp_model.n_features_
+            'n_features': int(self.csp_model.config.total_features)
         }
         
         metadata_path = output_path / "training_metadata.json"
@@ -740,7 +778,7 @@ class TrainingPipeline:
             'n_trials': self.n_trials,
             'n_windows': self.n_windows,
             'class_distribution': self.class_distribution,
-            'n_features': self.csp_model.n_features_,
+            'n_features': self.csp_model.config.total_features,
             'train_accuracy': train_accuracy,
             'cv_results': cv_results
         }
@@ -751,7 +789,7 @@ class TrainingPipeline:
             print("=" * 60)
             print(f"  Trials: {self.n_trials}")
             print(f"  Windows: {self.n_windows}")
-            print(f"  Features: {self.csp_model.n_features_}")
+            print(f"  Features: {self.csp_model.config.total_features}")
             print(f"  Training accuracy: {train_accuracy:.2%}")
             if cv_results:
                 print(f"  CV accuracy: {cv_results['mean_accuracy']:.2%} ± {cv_results['std_accuracy']:.2%}")

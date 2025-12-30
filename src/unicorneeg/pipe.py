@@ -215,6 +215,10 @@ class SlidingWindowGenerator:
         
         windows = []
         
+        # Convert to numpy array if DataFrame
+        if hasattr(trial_data, 'values'):
+            trial_data = trial_data.values
+        
         for win_idx in range(n_windows):
             start_idx = win_idx * self.step_samples
             end_idx = start_idx + self.window_samples
